@@ -50,6 +50,7 @@ import java.util.regex.Pattern;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 import javax.net.ssl.SSLContext;
+import javax.security.auth.callback.CallbackHandler;
 import javax.security.sasl.SaslClientFactory;
 
 import org.jboss.logging.Logger;
@@ -65,7 +66,6 @@ import org.jboss.remoting3.spi.ConnectionProviderContext;
 import org.jboss.remoting3.spi.ConnectionProviderFactory;
 import org.jboss.remoting3.spi.RegisteredService;
 import org.jboss.remoting3.spi.SpiUtils;
-
 import org.wildfly.common.Assert;
 import org.wildfly.security.auth.AuthenticationException;
 import org.wildfly.security.auth.client.AuthenticationConfiguration;
@@ -74,7 +74,6 @@ import org.wildfly.security.auth.client.AuthenticationContextConfigurationClient
 import org.wildfly.security.auth.server.SaslAuthenticationFactory;
 import org.wildfly.security.sasl.util.ProtocolSaslClientFactory;
 import org.wildfly.security.sasl.util.ServerNameSaslClientFactory;
-
 import org.xnio.Bits;
 import org.xnio.Cancellable;
 import org.xnio.FailedIoFuture;
@@ -196,8 +195,8 @@ final class EndpointImpl extends AbstractHandleableCloseable<Endpoint> implement
         log.tracef("Completed open of %s", this);
     }
 
-    static EndpointImpl construct(final EndpointBuilder endpointBuilder) throws IOException {
-        final String endpointName = endpointBuilder.getEndpointName();
+	static EndpointImpl construct(final EndpointBuilder endpointBuilder) throws IOException {
+		final String endpointName = endpointBuilder.getEndpointName();
         final List<ConnectionProviderFactoryBuilder> factoryBuilders = endpointBuilder.getConnectionProviderFactoryBuilders();
         final EndpointImpl endpoint;
 
@@ -628,6 +627,27 @@ final class EndpointImpl extends AbstractHandleableCloseable<Endpoint> implement
         }
     }
 
+	/**
+	 * See JBEAP-14783
+	 */
+	@Deprecated
+	public IoFuture<Connection> connect(final URI destination, final OptionMap connectOptions,
+			final CallbackHandler callbackHandler) throws IOException {
+		final AuthenticationContextConfigurationClient client = AUTH_CONFIGURATION_CLIENT;
+		AuthenticationContext authenticationContext = AuthenticationContext.captureCurrent();
+		AuthenticationConfiguration connectionConfiguration = client
+				.getAuthenticationConfiguration(destination, authenticationContext).useCallbackHandler(callbackHandler);
+		RemotingOptions.mergeOptionsIntoAuthenticationConfiguration(connectOptions, connectionConfiguration);
+
+		final SSLContext sslContext;
+		try {
+			sslContext = client.getSSLContext(destination, authenticationContext);
+		} catch (GeneralSecurityException e) {
+			return new FailedIoFuture<>(Messages.conn.failedToConfigureSslContext(e));
+		}
+		return connect(destination, null, connectOptions, sslContext, connectionConfiguration);
+	}
+
     private static <T> UnaryOperator<T> and(final UnaryOperator<T> first, final UnaryOperator<T> second) {
         return t -> second.apply(first.apply(t));
     }
@@ -649,6 +669,7 @@ final class EndpointImpl extends AbstractHandleableCloseable<Endpoint> implement
                     safeClose(provider);
                     throw new DuplicateRegistrationException("URI scheme '" + uriScheme + "' is already registered to a provider");
                 }
+
                 // add a resource count for close
                 log.tracef("Adding connection provider registration named '%s': %s", uriScheme, provider);
                 final Registration registration = new MapRegistration<ProtocolRegistration>(connectionProviders, uriScheme, protocolRegistration) {
