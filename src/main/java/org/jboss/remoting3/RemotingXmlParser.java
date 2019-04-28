@@ -194,15 +194,54 @@ final class RemotingXmlParser {
         }
     }
 
+    private static class ConnectionAttributes {
+        int readTimeout = -1;
+        int writeTimeout = -1;
+        int ipTrafficClass = -1;
+        boolean setTcpKeepAlive = false;
+        boolean tcpKeepAlive = false;
+        int heartbeatInterval = -1;
+    }
+
     private static void parseConnectionsElement(final ConfigurationXMLStreamReader reader, final EndpointBuilder builder) throws ConfigXMLParseException {
-        expectNoAttributes(reader);
+        //expectNoAttributes(reader);
+        final int attributeCount = reader.getAttributeCount();
+        ConnectionAttributes connectionDefaults = new ConnectionAttributes();
+        for (int i = 0; i < attributeCount; i++) {
+            checkAttributeNamespace(reader, i);
+            switch (reader.getAttributeLocalName(i)) {
+                case "read-timeout": {
+                    connectionDefaults.readTimeout = reader.getIntAttributeValueResolved(i, 0, Integer.MAX_VALUE);
+                    break;
+                }
+                case "write-timeout": {
+                    connectionDefaults.writeTimeout = reader.getIntAttributeValueResolved(i, 0, Integer.MAX_VALUE);
+                    break;
+                }
+                case "ip-traffic-class": {
+                    connectionDefaults.ipTrafficClass = reader.getIntAttributeValueResolved(i, 0, 255);
+                    break;
+                }
+                case "tcp-keepalive": {
+                    connectionDefaults.tcpKeepAlive = reader.getBooleanAttributeValueResolved(i);
+                    break;
+                }
+                case "heartbeat-interval": {
+                    connectionDefaults.heartbeatInterval = reader.getIntAttributeValueResolved(i, 0, Integer.MAX_VALUE);
+                    break;
+                }
+                default: {
+                    throw reader.unexpectedAttribute(i);
+                }
+            }
+        } 
         while (reader.hasNext()) {
             switch (reader.nextTag()) {
                 case START_ELEMENT: {
                     checkElementNamespace(reader);
                     switch (reader.getLocalName()) {
                         case "connection": {
-                            parseConnectionElement(reader, builder);
+                            parseConnectionElement(reader, builder, connectionDefaults);
                             break;
                         }
                         default: throw reader.unexpectedElement();
@@ -217,15 +256,10 @@ final class RemotingXmlParser {
         throw reader.unexpectedDocumentEnd();
     }
 
-    private static void parseConnectionElement(final ConfigurationXMLStreamReader reader, final EndpointBuilder builder) throws ConfigXMLParseException {
+    private static void parseConnectionElement(final ConfigurationXMLStreamReader reader, final EndpointBuilder builder, final ConnectionAttributes connectionAttributes) throws ConfigXMLParseException {
         final int attributeCount = reader.getAttributeCount();
         String destination = null;
-        int readTimeout = -1;
-        int writeTimeout = -1;
-        int ipTrafficClass = -1;
         boolean setTcpKeepAlive = false;
-        boolean tcpKeepAlive = false;
-        int heartbeatInterval = -1;
         for (int i = 0; i < attributeCount; i++) {
             checkAttributeNamespace(reader, i);
             switch (reader.getAttributeLocalName(i)) {
@@ -234,24 +268,24 @@ final class RemotingXmlParser {
                     break;
                 }
                 case "read-timeout": {
-                    readTimeout = reader.getIntAttributeValueResolved(i, 0, Integer.MAX_VALUE);
+                    connectionAttributes.readTimeout = reader.getIntAttributeValueResolved(i, 0, Integer.MAX_VALUE);
                     break;
                 }
                 case "write-timeout": {
-                    writeTimeout = reader.getIntAttributeValueResolved(i, 0, Integer.MAX_VALUE);
+                    connectionAttributes.writeTimeout = reader.getIntAttributeValueResolved(i, 0, Integer.MAX_VALUE);
                     break;
                 }
                 case "ip-traffic-class": {
-                    ipTrafficClass = reader.getIntAttributeValueResolved(i, 0, 255);
+                    connectionAttributes.ipTrafficClass = reader.getIntAttributeValueResolved(i, 0, 255);
                     break;
                 }
                 case "tcp-keepalive": {
                     setTcpKeepAlive = true;
-                    tcpKeepAlive = reader.getBooleanAttributeValueResolved(i);
+                    connectionAttributes.tcpKeepAlive = reader.getBooleanAttributeValueResolved(i);
                     break;
                 }
                 case "heartbeat-interval": {
-                    heartbeatInterval = reader.getIntAttributeValueResolved(i, 0, Integer.MAX_VALUE);
+                    connectionAttributes.heartbeatInterval = reader.getIntAttributeValueResolved(i, 0, Integer.MAX_VALUE);
                     break;
                 }
                 default: {
@@ -263,20 +297,20 @@ final class RemotingXmlParser {
             throw reader.missingRequiredAttribute("", "destination");
         }
         final ConnectionBuilder connectionBuilder = builder.addConnection(URI.create(destination));
-        if (readTimeout != -1L) {
-            connectionBuilder.setReadTimeout(readTimeout);
+        if (connectionAttributes.readTimeout != -1L) {
+            connectionBuilder.setReadTimeout(connectionAttributes.readTimeout);
         }
-        if (writeTimeout != -1L) {
-            connectionBuilder.setWriteTimeout(writeTimeout);
+        if (connectionAttributes.writeTimeout != -1L) {
+            connectionBuilder.setWriteTimeout(connectionAttributes.writeTimeout);
         }
-        if (ipTrafficClass != -1) {
-            connectionBuilder.setIpTrafficClass(ipTrafficClass);
+        if (connectionAttributes.ipTrafficClass != -1) {
+            connectionBuilder.setIpTrafficClass(connectionAttributes.ipTrafficClass);
         }
         if (setTcpKeepAlive) {
-            connectionBuilder.setTcpKeepAlive(tcpKeepAlive);
+            connectionBuilder.setTcpKeepAlive(connectionAttributes.tcpKeepAlive);
         }
-        if (heartbeatInterval != -1) {
-            connectionBuilder.setHeartbeatInterval(heartbeatInterval);
+        if (connectionAttributes.heartbeatInterval != -1) {
+            connectionBuilder.setHeartbeatInterval(connectionAttributes.heartbeatInterval);
         }
         if (reader.nextTag() != END_ELEMENT) {
             throw reader.unexpectedContent();
